@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Download, Calendar, Clock, Tag, ExternalLink, ArrowLeft } from 'lucide-react';
+import { FileText, Calendar, ArrowLeft, ClipboardList } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db } from '../firebase';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
@@ -14,125 +14,125 @@ export default function AssignmentListScreen({ onBack }: AssignmentListScreenPro
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
-    const assignmentsQuery = query(
-      collection(db, 'assignments'),
-      orderBy('dueDate', 'asc')
+    const q = query(collection(db, 'assignments'), orderBy('dueDate', 'asc'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setAssignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Assignment)));
+        setIsLoading(false);
+      },
+      () => setIsLoading(false)
     );
-    const unsubscribe = onSnapshot(assignmentsQuery, (snapshot) => {
-      setAssignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Assignment[]);
-      setIsLoading(false);
-    });
-
     return () => unsubscribe();
   }, []);
 
-  const handleDownload = (title: string) => {
-    console.log(`Downloading: ${title}`);
-  };
-
-  const handleSubmit = (title: string) => {
-    console.log(`Submitting work for: ${title}`);
-  };
-
   return (
-    <div className="space-y-16">
+    <div className="space-y-12">
       {/* Header */}
       <section className="space-y-6">
-        <button 
+        <button
           onClick={onBack}
           className="flex items-center gap-2 text-outline hover:text-white transition-colors group"
         >
           <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
           <span className="text-[10px] font-bold uppercase tracking-widest">Back to Dashboard</span>
         </button>
-        
-        <div className="space-y-2">
-          <motion.h2 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="font-headline text-2xl md:text-4xl md:text-5xl font-bold tracking-tight text-white"
-          >
-            Task <span className="text-brand-green">Atelier.</span>
-          </motion.h2>
-          <p className="text-outline text-sm font-medium tracking-wide">Manage and submit your academic assignments.</p>
+
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="space-y-2">
+            <motion.h2
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="font-headline text-2xl md:text-4xl lg:text-5xl font-bold tracking-tight text-white"
+            >
+              Assign<span className="text-brand-green">ments.</span>
+            </motion.h2>
+            <p className="text-outline text-sm font-medium tracking-wide">
+              Your pending academic tasks.
+            </p>
+          </div>
+
+          {/* Total count badge */}
+          {!isLoading && (
+            <div className="bg-surface-container-low rounded-2xl px-6 py-4 border border-outline-variant/5 flex items-center gap-4 self-start md:self-auto">
+              <ClipboardList size={20} className="text-brand-green" />
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-widest text-outline">Total</p>
+                <p className="text-2xl font-bold text-white leading-none mt-0.5">
+                  {assignments.length.toString().padStart(2, '0')}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Stats Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[
-          { label: 'Pending Tasks', value: assignments.length.toString().padStart(2, '0'), color: 'text-brand-green' },
-          { label: 'Due This Week', value: '02', color: 'text-white' },
-          { label: 'Completion Rate', value: '88%', color: 'text-outline' },
-        ].map((stat, idx) => (
-          <div key={idx} className="bg-surface-container-low p-4 md:p-6 rounded-2xl border border-outline-variant/5">
-            <p className="text-[10px] uppercase tracking-widest text-outline font-bold mb-2">{stat.label}</p>
-            <p className={`text-xl md:text-3xl font-bold ${stat.color}`}>{stat.value}</p>
-          </div>
-        ))}
-      </div>
-
       {/* Assignment List */}
-      <section className="space-y-6">
+      <section className="space-y-4">
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center py-20 space-y-4">
-            <div className="w-10 h-10 md:w-12 md:h-12 border-4 border-brand-green/20 border-t-brand-green rounded-full animate-spin"></div>
-            <p className="text-outline text-xs font-bold uppercase tracking-widest">Loading Tasks...</p>
+          <div className="flex flex-col items-center justify-center py-24 space-y-4">
+            <div className="w-10 h-10 border-2 border-brand-green/20 border-t-brand-green rounded-full animate-spin" />
+            <p className="text-outline text-[10px] font-bold uppercase tracking-widest animate-pulse">
+              Loading assignments…
+            </p>
           </div>
-        ) : assignments.length > 0 ? (
+        ) : assignments.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 bg-surface-container-low rounded-2xl border border-dashed border-outline-variant/20 space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-surface-container-high flex items-center justify-center text-outline/60">
+              <ClipboardList size={28} />
+            </div>
+            <div className="text-center space-y-1">
+              <p className="text-white font-bold text-sm">No assignments yet</p>
+              <p className="text-outline text-xs">Check back later — your teacher will post tasks here.</p>
+            </div>
+          </div>
+        ) : (
           assignments.map((assignment) => (
-            <div key={assignment.id} className="group bg-surface-container-low hover:bg-surface-container-high rounded-2xl p-4 md:p-8 border border-outline-variant/5 transition-all flex flex-col lg:flex-row gap-8 items-start lg:items-center">
-              <div className="w-14 h-14 rounded-xl bg-surface-container-high flex items-center justify-center text-brand-green shrink-0 group-hover:scale-105 transition-transform">
-                <FileText size={24} />
-              </div>
-              
-              <div className="flex-1 space-y-3">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-bold text-white group-hover:text-brand-green transition-colors">{assignment.title}</h3>
-                  <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest ${
-                    assignment.priority === 'High' ? 'bg-error/10 text-error' : 'bg-brand-green/10 text-brand-green'
-                  }`}>
-                    {assignment.priority}
-                  </span>
-                </div>
-                <p className="text-outline text-sm leading-relaxed max-w-2xl line-clamp-2">{assignment.description}</p>
-                
-                <div className="flex flex-wrap gap-6 pt-1">
-                  <div className="flex items-center gap-2 text-outline">
-                    <Calendar size={14} />
-                    <span className="text-[10px] font-medium uppercase tracking-widest">Due: {assignment.dueDate}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-outline">
-                    <Tag size={14} />
-                    <span className="text-[10px] font-medium uppercase tracking-widest">Academic</span>
-                  </div>
-                </div>
+            <div
+              key={assignment.id}
+              className="group bg-surface-container-low hover:bg-surface-container-high rounded-2xl p-4 md:p-6 border border-outline-variant/5 hover:border-brand-green/20 transition-all flex flex-col sm:flex-row gap-4 sm:items-center"
+            >
+              {/* Icon */}
+              <div className="w-11 h-11 rounded-xl bg-surface-container-high flex items-center justify-center text-brand-green group-hover:scale-105 transition-transform flex-shrink-0">
+                <FileText size={20} />
               </div>
 
-              <div className="flex gap-3 w-full lg:w-auto">
-                <button 
-                  onClick={() => handleDownload(assignment.title)}
-                  className="flex-1 lg:flex-none px-6 py-3 rounded-full bg-surface-container-high text-outline text-[10px] font-bold uppercase tracking-widest hover:text-white transition-all flex items-center justify-center gap-2"
-                >
-                  Brief
-                  <Download size={14} />
-                </button>
-                <button 
-                  onClick={() => handleSubmit(assignment.title)}
-                  className="flex-1 lg:flex-none px-6 py-3 rounded-full bg-brand-green text-surface text-[10px] font-bold uppercase tracking-widest hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2"
-                >
-                  Submit
-                  <ExternalLink size={14} />
-                </button>
+              {/* Info */}
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-bold text-white group-hover:text-brand-green transition-colors truncate">
+                    {assignment.title}
+                  </h3>
+                  {assignment.priority && (
+                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest flex-shrink-0 ${
+                      assignment.priority === 'High'
+                        ? 'bg-error/10 text-error'
+                        : 'bg-surface-container-highest text-outline'
+                    }`}>
+                      {assignment.priority}
+                    </span>
+                  )}
+                </div>
+
+                {assignment.description && (
+                  <p className="text-outline text-xs leading-relaxed line-clamp-2">
+                    {assignment.description}
+                  </p>
+                )}
+
+                {assignment.dueDate && (
+                  <div className="flex items-center gap-1.5 text-outline">
+                    <Calendar size={12} />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">
+                      Due: {assignment.dueDate}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           ))
-        ) : (
-          <div className="text-center py-20 bg-surface-container-low rounded-2xl border border-dashed border-outline-variant/20">
-            <p className="text-outline text-sm italic">No assignments assigned yet.</p>
-          </div>
         )}
       </section>
     </div>
   );
- }
+}

@@ -283,10 +283,11 @@ export default function App() {
   };
 
   return (
-    <Layout 
-      role={role} 
-      activeTab={activeTab} 
+    <Layout
+      role={role}
+      activeTab={activeTab}
       setActiveTab={(tab) => { setActiveTab(tab); setCurrentView(null); }}
+      onViewChange={(view) => { setCurrentView(view); }}
       onLogout={handleLogout}
     >
       {renderContent()}
