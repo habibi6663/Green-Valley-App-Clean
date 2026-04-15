@@ -5,6 +5,7 @@ import { db, auth } from '../firebase';
 import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import { Student, ScheduleItem } from '../types';
 import { MOCK_SCHEDULE } from '../constants';
+import { getDisplayRollNumber } from '../lib/rollNumberUtils';
 
 interface TeacherDashboardProps {
   onTakeAttendance: () => void;
@@ -32,7 +33,7 @@ export default function TeacherDashboard({ onTakeAttendance, onUploadNotes, onVi
     const studentsUnsubscribe = onSnapshot(
       collection(db, 'users'),
       (snapshot) => {
-        const allUsers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const allUsers: any[] = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Record<string, any>) }));
         console.log('Users:', allUsers);
 
         const studentList = allUsers
@@ -41,7 +42,7 @@ export default function TeacherDashboard({ onTakeAttendance, onUploadNotes, onVi
           .map(u => ({
             id: u.id,
             name: u.fullName || u.name || 'Unknown',
-            rollNo: u.id.slice(0, 4).toUpperCase(),
+            rollNo: getDisplayRollNumber(u),
             avatar: `https://picsum.photos/seed/${u.id}/200`,
             class: u.class || 'General',
             section: u.section || 'A'
@@ -149,6 +150,7 @@ export default function TeacherDashboard({ onTakeAttendance, onUploadNotes, onVi
               <thead>
                 <tr className="bg-surface-container-high/30">
                   <th className="px-6 py-4 text-[10px] font-bold text-outline uppercase tracking-widest">Student</th>
+                  <th className="px-6 py-4 text-[10px] font-bold text-outline uppercase tracking-widest">Roll No.</th>
                   <th className="px-6 py-4 text-[10px] font-bold text-outline uppercase tracking-widest">Placement</th>
                 </tr>
               </thead>
@@ -167,8 +169,14 @@ export default function TeacherDashboard({ onTakeAttendance, onUploadNotes, onVi
                           className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover grayscale group-hover:grayscale-0 transition-all" 
                           referrerPolicy="no-referrer"
                         />
-                        <span className="text-sm font-bold text-white group-hover:text-brand-green transition-colors">{student.name}</span>
+                        <div className="min-w-0">
+                          <span className="block text-sm font-bold text-white group-hover:text-brand-green transition-colors truncate">{student.name}</span>
+                          <span className="block text-[10px] text-outline uppercase tracking-widest md:hidden">{student.rollNo}</span>
+                        </div>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 text-xs text-outline whitespace-nowrap">
+                      {student.rollNo}
                     </td>
                     <td className="px-6 py-4 text-xs text-outline">
                       {student.class} - {student.section}

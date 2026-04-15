@@ -1,16 +1,33 @@
 import React from 'react';
-import { User, Mail, Shield, LogOut, Settings, Bell, Lock, ChevronRight } from 'lucide-react';
+import { User, Shield, Settings, Bell, Lock, ChevronRight } from 'lucide-react';
 import { UserRole } from '../types';
-import { auth } from '../firebase';
-import { motion } from 'motion/react';
+import { auth, db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import LogoutButton from '../components/LogoutButton';
+import { getDisplayRollNumber } from '../lib/rollNumberUtils';
 
 interface ProfileScreenProps {
   role: UserRole | null;
-  onLogout: () => void;
 }
 
-export default function ProfileScreen({ role, onLogout }: ProfileScreenProps) {
+export default function ProfileScreen({ role }: ProfileScreenProps) {
   const user = auth.currentUser;
+  const [rollNumber, setRollNumber] = React.useState<string>('');
+
+  React.useEffect(() => {
+    const fetchRollNumber = async () => {
+      if (!user?.uid || role !== 'STUDENT') return;
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          setRollNumber(getDisplayRollNumber(userDoc.data()));
+        }
+      } catch (err) {
+        console.error('[PROFILE] Error fetching roll number:', err);
+      }
+    };
+    fetchRollNumber();
+  }, [user?.uid, role]);
 
   const settingsOptions = [
     { icon: Bell, label: 'Notifications', description: 'Alerts and updates' },
@@ -34,6 +51,11 @@ export default function ProfileScreen({ role, onLogout }: ProfileScreenProps) {
         <div className="space-y-1">
           <h2 className="text-2xl font-bold text-white">{user?.displayName || 'User'}</h2>
           <p className="text-outline text-[10px] font-bold uppercase tracking-widest">{role} • {user?.email}</p>
+          {role === 'STUDENT' && (
+            <p className="text-outline/70 text-[10px] font-bold uppercase tracking-widest">
+              Roll No: <span className="text-white">{rollNumber || 'Not assigned'}</span>
+            </p>
+          )}
         </div>
       </section>
 
@@ -63,13 +85,10 @@ export default function ProfileScreen({ role, onLogout }: ProfileScreenProps) {
 
       {/* Logout Section */}
       <section className="pt-8">
-        <button 
-          onClick={onLogout}
-          className="w-full py-4 bg-surface-container-low border border-error/20 text-error rounded-full font-bold text-xs uppercase tracking-widest hover:bg-error/5 active:scale-95 transition-all flex items-center justify-center gap-3"
-        >
-          <LogOut size={18} />
-          Sign Out of Portal
-        </button>
+        <LogoutButton
+          className="w-full justify-center rounded-full border-error/20 bg-surface-container-low px-4 py-4 text-error hover:border-error/20 hover:bg-error/5 hover:text-error"
+          label="Sign Out of Portal"
+        />
       </section>
     </div>
   );

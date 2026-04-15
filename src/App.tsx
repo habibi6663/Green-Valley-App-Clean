@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { UserRole } from './types';
-import Layout from './components/Layout';
+import Layout from './components/ResponsiveLayout';
 import LoginScreen from './screens/LoginScreen';
 import AdminDashboard from './screens/AdminDashboard';
 import TeacherDashboard from './screens/TeacherDashboard';
@@ -24,6 +24,7 @@ import NoticesScreen from './screens/NoticesScreen';
 import EventsScreen from './screens/EventsScreen';
 import GalleryScreen from './screens/GalleryScreen';
 import HomeworkScreen from './screens/HomeworkScreen';
+import NetworkStatusBanner from './components/NetworkStatusBanner';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -33,6 +34,25 @@ const DASHBOARD_PATHS: Record<UserRole, string> = {
   TEACHER: '/teacher',
   STUDENT: '/student',
   PARENT: '/parent',
+};
+
+const ROLE_PERMISSIONS: Record<UserRole, { tabs: string[]; views: string[] }> = {
+  ADMIN: {
+    tabs: ['dashboard', 'attendance', 'notes', 'homework', 'notices', 'events', 'gallery', 'fees', 'profile'],
+    views: ['users', 'addUser', 'reports', 'messaging', 'attendance', 'billing'],
+  },
+  TEACHER: {
+    tabs: ['dashboard', 'attendance', 'notes', 'homework', 'notices', 'events', 'gallery', 'fees', 'profile'],
+    views: ['messaging', 'assignments', 'users', 'attendance'],
+  },
+  STUDENT: {
+    tabs: ['dashboard', 'attendance', 'notes', 'homework', 'notices', 'events', 'gallery', 'fees', 'profile'],
+    views: ['assignments', 'billing'],
+  },
+  PARENT: {
+    tabs: ['dashboard', 'attendance', 'notes', 'notices', 'events', 'gallery', 'fees', 'profile'],
+    views: ['payment', 'messaging', 'attendance', 'billing'],
+  },
 };
 
 function normalizeUserRole(role: unknown): UserRole | null {
@@ -61,21 +81,28 @@ export default function App() {
 
   React.useEffect(() => {
     console.log('[APP] Initializing Auth State Listener...');
+    let isActive = true;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!isActive) return;
       setIsLoading(true);
       setAuthError(null);
+
       if (user) {
         try {
           console.log('[APP] Auth state changed: User detected. UID:', user.uid);
           let userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!isActive) return;
           
           if (!userDoc.exists()) {
             console.log('[APP] User document not found in Firestore. Retrying in 1.5s...');
             await new Promise(resolve => setTimeout(resolve, 1500));
+            if (!isActive) return;
             userDoc = await getDoc(doc(db, 'users', user.uid));
           }
 
           if (userDoc.exists()) {
+            if (!isActive) return;
             const userData = userDoc.data();
             const normalizedRole = normalizeUserRole(userData.role);
 
@@ -91,6 +118,7 @@ export default function App() {
             }
           } else {
             const adminEmails = ['greenvalleyschool119@gmail.com', 'darkn8gaming@gmail.com'];
+            if (!isActive) return;
             if (user.email && adminEmails.includes(user.email.toLowerCase())) {
               setRole('ADMIN');
               setCurrentUser({ id: user.uid, email: user.email, role: 'ADMIN' });
@@ -100,19 +128,26 @@ export default function App() {
             }
           }
         } catch (error) {
+          if (!isActive) return;
           setRole(null);
           setCurrentUser(null);
           setAuthError('Unable to load your account profile. Please try again.');
         }
       } else {
+        if (!isActive) return;
         setRole(null);
         setCurrentUser(null);
         setAuthError(null);
       }
-      setIsLoading(false);
+      if (isActive) {
+        setIsLoading(false);
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      isActive = false;
+      unsubscribe();
+    };
   }, []);
 
   React.useEffect(() => {
@@ -125,27 +160,7 @@ export default function App() {
     if (isLoading || !role) return;
 
     const validateRoute = () => {
-      // Define allowed tabs and views for each role
-      const rolePermissions: Record<UserRole, { tabs: string[], views: string[] }> = {
-        ADMIN: {
-          tabs: ['dashboard', 'attendance', 'notes', 'homework', 'notices', 'events', 'gallery', 'fees', 'profile'],
-          views: ['users', 'addUser', 'reports', 'messaging', 'attendance', 'billing']
-        },
-        TEACHER: {
-          tabs: ['dashboard', 'attendance', 'notes', 'homework', 'notices', 'events', 'gallery', 'fees', 'profile'],
-          views: ['messaging', 'assignments', 'users', 'attendance']
-        },
-        STUDENT: {
-          tabs: ['dashboard', 'attendance', 'notes', 'homework', 'notices', 'events', 'gallery', 'fees', 'profile'],
-          views: ['assignments', 'billing']
-        },
-        PARENT: {
-          tabs: ['dashboard', 'attendance', 'notes', 'notices', 'events', 'gallery', 'fees', 'profile'],
-          views: ['payment', 'messaging', 'attendance', 'billing']
-        }
-      };
-
-      const permissions = rolePermissions[role];
+      const permissions = ROLE_PERMISSIONS[role];
       if (!permissions) return;
 
       const isTabAllowed = permissions.tabs.includes(activeTab);
@@ -175,17 +190,25 @@ export default function App() {
     setCurrentView(null);
   };
 
-  const handleLogout = async () => {
+  const handleLogout = React.useCallback(async () => {
     try {
       await signOut(auth);
+      if (typeof window !== 'undefined') {
+        const firebaseKeys = Object.keys(window.localStorage).filter((key) => key.startsWith('firebase:'));
+        firebaseKeys.forEach((key) => window.localStorage.removeItem(key));
+        window.sessionStorage.clear();
+        window.history.replaceState(null, '', '/');
+      }
       setRole(null);
+      setCurrentUser(null);
       setActiveTab('dashboard');
       setCurrentView(null);
       setAuthError(null);
     } catch (error) {
       console.error('Error signing out:', error);
+      throw error;
     }
-  };
+  }, []);
 
   if (isLoading) {
     return (
@@ -235,7 +258,7 @@ export default function App() {
     if (activeTab === 'events') return <EventsScreen role={role} />;
     if (activeTab === 'gallery') return <GalleryScreen role={role} />;
     if (activeTab === 'profile') {
-      return <ProfileScreen role={role} onLogout={handleLogout} />;
+      return <ProfileScreen role={role} />;
     }
 
     // Default Dashboards based on role
@@ -283,13 +306,22 @@ export default function App() {
   };
 
   return (
-    <Layout 
-      role={role} 
-      activeTab={activeTab} 
-      setActiveTab={(tab) => { setActiveTab(tab); setCurrentView(null); }}
-      onLogout={handleLogout}
-    >
-      {renderContent()}
-    </Layout>
+    <>
+      <NetworkStatusBanner />
+      <Layout
+        role={role}
+        activeTab={activeTab}
+        setActiveTab={(tab) => {
+          setActiveTab(tab);
+          setCurrentView(null);
+        }}
+        onViewChange={(view) => {
+          setCurrentView(view);
+        }}
+        onLogout={handleLogout}
+      >
+        {renderContent()}
+      </Layout>
+    </>
   );
 }

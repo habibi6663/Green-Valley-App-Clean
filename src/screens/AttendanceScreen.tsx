@@ -7,6 +7,7 @@ import { collection, query, where, getDocs, doc, setDoc, updateDoc, addDoc, serv
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { getTeacherAssignments, getTeacherClassList } from '../lib/teacherClassUtils';
 import { VALID_CLASSES } from '../constants';
+import { getDisplayRollNumber, parseRollNumberSource, normalizeSectionCode } from '../lib/rollNumberUtils';
 
 interface AttendanceScreenProps {
   onBack: () => void;
@@ -21,6 +22,8 @@ export default function AttendanceScreen({ onBack, user }: AttendanceScreenProps
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [adminReports, setAdminReports] = React.useState<any[]>([]);
+  const [sortMode, setSortMode] = React.useState<'roll' | 'alphabetical'>('roll');
+  const [rollSearch, setRollSearch] = React.useState('');
 
   // Override States
   const [pendingOverride, setPendingOverride] = React.useState<any | null>(null);
@@ -41,108 +44,199 @@ export default function AttendanceScreen({ onBack, user }: AttendanceScreenProps
 
   React.useEffect(() => {
     console.log('[ATTENDANCE] Fetching records for role:', role);
-    let q;
-    
-    // BACKEND FILTERING (UI-LEVEL FOR NOW, but using specific queries)
-    if (role === 'STUDENT') {
-      q = query(collection(db, 'users'), where('uid', '==', user.id));
-    } else if (role === 'PARENT' && user.childId) {
-      q = query(collection(db, 'users'), where('uid', '==', user.childId));
-    } else if (role === 'TEACHER' && teacherClasses.length > 0) {
-      q = query(
-        collection(db, 'users'),
-        where('role', '==', 'STUDENT'),
-        where('class', 'in', teacherClasses)
-      );
-    } else if (role === 'TEACHER') {
-      q = query(collection(db, 'users'), where('role', '==', '__NO_ASSIGNED_CLASSES__'));
-    } else {
-      q = query(collection(db, 'users'));
-    }
+    setIsLoading(true);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const studentsData = usersData.filter(u => u.role?.toLowerCase() === 'student');
+    let userUnsubscribe: (() => void) | undefined;
+    let attendanceUnsubscribe: (() => void) | undefined;
 
-      const studentList = studentsData.map(u => ({
-        id: u.id,
-        name: u.fullName || u.name || 'Unknown Student',
-        class: (u.class || 'General').toString(),
-        section: (u.section || 'A').toString(),
-        rollNo: u.id.slice(0, 4).toUpperCase(),
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.email || u.id}`,
-        status: 'PENDING'
-      }));
-
-      // SYNC WITH ATTENDANCE RECORDS FOR TODAY
+    const syncAttendanceState = (studentList: any[], scope: { classValue: string; section: string }) => {
+      if (attendanceUnsubscribe) attendanceUnsubscribe();
       const today = new Date().toISOString().split('T')[0];
-      const attQuery =
-        role === 'TEACHER' && teacherClasses.length > 0
-          ? query(
-              collection(db, 'attendance'),
-              where('date', '==', today),
-              where('class', 'in', teacherClasses)
-            )
-          : query(collection(db, 'attendance'), where('date', '==', today));
-      
-      onSnapshot(attQuery, (attSnapshot) => {
-        const attDocs = attSnapshot.docs.reduce((acc: any, doc) => {
-          const data = doc.data();
+      const attQuery = scope.section !== 'ALL'
+        ? query(
+            collection(db, 'attendance'),
+            where('date', '==', today),
+            where('class', '==', scope.classValue),
+            where('section', '==', scope.section),
+          )
+        : query(
+            collection(db, 'attendance'),
+            where('date', '==', today),
+            where('class', '==', scope.classValue),
+          );
+
+      attendanceUnsubscribe = onSnapshot(attQuery, (attSnapshot) => {
+        const attendanceMap = attSnapshot.docs.reduce((acc: any, docSnap) => {
+          const data = docSnap.data() as any;
           if (data.students && Array.isArray(data.students)) {
             data.students.forEach((s: any) => {
               acc[s.studentId] = {
                 status: s.status,
                 lastModifiedBy: s.lastModifiedBy,
-                modificationReason: s.modificationReason
+                modificationReason: s.modificationReason,
               };
             });
           } else if (data.studentId) {
-            acc[data.studentId] = { 
+            acc[data.studentId] = {
               status: data.status,
               lastModifiedBy: data.lastModifiedBy,
-              modificationReason: data.modificationReason 
+              modificationReason: data.modificationReason,
             };
           }
           return acc;
         }, {});
 
-        const syncedList = studentList.map(s => {
-          const record = attDocs[s.id] || { status: 'PENDING' };
+        const syncedList = studentList.map((student) => {
+          const record = attendanceMap[student.id] || { status: 'PENDING' };
           return {
-            ...s,
+            ...student,
             status: record.status,
             lastModifiedBy: record.lastModifiedBy,
-            modificationReason: record.modificationReason
+            modificationReason: record.modificationReason,
           };
         });
 
         setAllStudents(syncedList);
+        setIsLoading(false);
+      }, (error) => {
+        console.error('[ATTENDANCE] Attendance stream error:', error);
+        setIsLoading(false);
       });
+    };
 
-      // For Student/Parent, they only ever see their own class, so force it
-      if (studentList.length > 0 && (role === 'STUDENT' || role === 'PARENT')) {
-        setSelectedClass(studentList[0].class);
-        setSelectedSection(studentList[0].section);
+    const loadStudentSnapshot = (studentDoc: any) => {
+      if (!studentDoc) {
+        setAllStudents([]);
+        setIsLoading(false);
+        return;
       }
 
-      setIsLoading(false);
-    }, (error) => {
-      console.error('[ATTENDANCE] Error fetching students:', error);
-      setIsLoading(false);
-    });
+      const studentData = (studentDoc.data ? studentDoc.data() : studentDoc) as any;
+      const studentList = [{
+        id: studentDoc.id || user?.id,
+        name: studentData.fullName || studentData.name || 'Unknown Student',
+        class: (studentData.class || 'General').toString(),
+        section: normalizeSectionCode(studentData.section || 'A'),
+        rollNo: getDisplayRollNumber(studentData),
+        rollNumber: studentData.rollNumber || '',
+        rollNumberKey: studentData.rollNumberKey || '',
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${studentData.email || studentDoc.id || user?.id}`,
+        status: 'PENDING',
+      }];
 
-    return () => unsubscribe();
-  }, [user, role, teacherClasses]);
+      setSelectedClass(studentData.class || 'General');
+      setSelectedSection(normalizeSectionCode(studentData.section || 'A'));
+      syncAttendanceState(studentList, {
+        classValue: studentData.class || 'General',
+        section: normalizeSectionCode(studentData.section || 'A'),
+      });
+    };
+
+    if (role === 'STUDENT') {
+      if (!user?.id) {
+        setIsLoading(false);
+        return;
+      }
+      userUnsubscribe = onSnapshot(doc(db, 'users', user.id), (studentSnap) => {
+        if (studentSnap.exists()) {
+          loadStudentSnapshot({ id: studentSnap.id, data: () => studentSnap.data() } as any);
+        } else {
+          setAllStudents([]);
+          setIsLoading(false);
+        }
+      }, (error) => {
+        console.error('[ATTENDANCE] Student profile load failed:', error);
+        setIsLoading(false);
+      });
+    } else if (role === 'PARENT') {
+      if (!user?.childId) {
+        setIsLoading(false);
+        return;
+      }
+      userUnsubscribe = onSnapshot(doc(db, 'users', user.childId), (studentSnap) => {
+        if (studentSnap.exists()) {
+          loadStudentSnapshot({ id: studentSnap.id, data: () => studentSnap.data() } as any);
+        } else {
+          setAllStudents([]);
+          setIsLoading(false);
+        }
+      }, (error) => {
+        console.error('[ATTENDANCE] Linked student load failed:', error);
+        setIsLoading(false);
+      });
+    } else {
+      if (role === 'TEACHER' && teacherAssignments.length === 0) {
+        setAllStudents([]);
+        setIsLoading(false);
+        return;
+      }
+
+      if (role === 'TEACHER' && teacherClasses.length > 0 && !teacherClasses.includes(selectedClass)) {
+        setSelectedClass(teacherClasses[0]);
+      }
+
+      const studentQuery = selectedSection !== 'ALL'
+        ? query(collection(db, 'users'), where('role', '==', 'STUDENT'), where('class', '==', selectedClass), where('section', '==', selectedSection))
+        : query(collection(db, 'users'), where('role', '==', 'STUDENT'), where('class', '==', selectedClass));
+      userUnsubscribe = onSnapshot(studentQuery, (snapshot) => {
+        const studentList = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          name: (docSnap.data() as any).fullName || (docSnap.data() as any).name || 'Unknown Student',
+          class: ((docSnap.data() as any).class || 'General').toString(),
+          section: normalizeSectionCode((docSnap.data() as any).section || 'A'),
+          rollNo: getDisplayRollNumber(docSnap.data() as any),
+          rollNumber: (docSnap.data() as any).rollNumber || '',
+          rollNumberKey: (docSnap.data() as any).rollNumberKey || '',
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${(docSnap.data() as any).email || docSnap.id}`,
+          status: 'PENDING',
+        }));
+
+        syncAttendanceState(studentList, {
+          classValue: selectedClass,
+          section: selectedSection,
+        });
+      }, (error) => {
+        console.error('[ATTENDANCE] Error fetching students:', error);
+        setIsLoading(false);
+      });
+    }
+
+    return () => {
+      if (userUnsubscribe) userUnsubscribe();
+      if (attendanceUnsubscribe) attendanceUnsubscribe();
+    };
+  }, [user, role, selectedClass, selectedSection, teacherAssignments, teacherClasses]);
 
   React.useEffect(() => {
-    const filtered = allStudents.filter(s => {
-      if (role === 'TEACHER' && selectedSection === 'ALL') {
-        return s.class === selectedClass;
-      }
-      return s.class === selectedClass && s.section === selectedSection;
+    const search = rollSearch.trim().toLowerCase();
+    const filtered = allStudents.filter((student) => {
+      const matchesClass = role === 'STUDENT' || role === 'PARENT'
+        ? true
+        : selectedSection === 'ALL'
+          ? student.class === selectedClass
+          : student.class === selectedClass && student.section === selectedSection;
+
+      const matchesSearch = !search ||
+        student.name.toLowerCase().includes(search) ||
+        String(student.rollNo || '').toLowerCase().includes(search) ||
+        String(student.rollNumber || '').toLowerCase().includes(search);
+
+      return matchesClass && matchesSearch;
     });
-    setStudents(filtered);
-  }, [allStudents, selectedClass, selectedSection, role]);
+
+    const sorted = [...filtered].sort((a, b) => {
+      if (sortMode === 'alphabetical') {
+        return a.name.localeCompare(b.name);
+      }
+
+      const aSequence = parseRollNumberSource(a).rollNumberSequence || Number.MAX_SAFE_INTEGER;
+      const bSequence = parseRollNumberSource(b).rollNumberSequence || Number.MAX_SAFE_INTEGER;
+      if (aSequence !== bSequence) return aSequence - bSequence;
+      return a.name.localeCompare(b.name);
+    });
+
+    setStudents(sorted);
+  }, [allStudents, selectedClass, selectedSection, role, rollSearch, sortMode]);
 
   // Admin Historical Reports Stream
   React.useEffect(() => {
@@ -191,6 +285,7 @@ export default function AttendanceScreen({ onBack, user }: AttendanceScreenProps
     }
 
     // Normal behavior (first marking for today)
+    setAllStudents(prev => prev.map(s => s.id === id ? { ...s, status } : s));
     setStudents(prev => prev.map(s => s.id === id ? { ...s, status } : s));
   };
 
@@ -221,6 +316,8 @@ export default function AttendanceScreen({ onBack, user }: AttendanceScreenProps
             found = true;
             return {
               ...s,
+              rollNumber: pendingOverride.student.rollNumber || pendingOverride.student.rollNo || '',
+              rollNumberKey: pendingOverride.student.rollNumberKey || '',
               status: pendingOverride.targetStatus,
               lastModifiedBy: user.id,
               lastModifiedRole: 'ADMIN',
@@ -236,6 +333,8 @@ export default function AttendanceScreen({ onBack, user }: AttendanceScreenProps
           updatedStudents.push({
             studentId: pendingOverride.student.id,
             name: pendingOverride.student.name,
+            rollNumber: pendingOverride.student.rollNumber || pendingOverride.student.rollNo || '',
+            rollNumberKey: pendingOverride.student.rollNumberKey || '',
             status: pendingOverride.targetStatus,
             lastModifiedBy: user.id,
             lastModifiedRole: 'ADMIN',
@@ -322,6 +421,8 @@ export default function AttendanceScreen({ onBack, user }: AttendanceScreenProps
         students: students.map(s => ({
           studentId: s.id,
           name: s.name,
+          rollNumber: s.rollNumber || s.rollNo || '',
+          rollNumberKey: s.rollNumberKey || '',
           status: s.status !== 'PENDING' ? s.status : 'ABSENT',
         })),
         markedBy: user.id,
@@ -560,24 +661,55 @@ export default function AttendanceScreen({ onBack, user }: AttendanceScreenProps
       )}
 
       {/* Controls - Only for Elevated Roles */}
-      {isElevated && (
-        <section className="flex flex-wrap gap-4 items-center border-b border-outline-variant/10 pb-8">
-          <button 
-            onClick={() => setStudents(prev => prev.map(s => ({ ...s, status: 'PRESENT' })))}
-            className="px-6 py-2.5 bg-brand-green text-surface rounded-full font-bold text-xs uppercase tracking-widest hover:opacity-90 active:scale-95 transition-all"
+      <section className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between border-b border-outline-variant/10 pb-8">
+        <div className="relative w-full lg:max-w-md">
+          <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-outline" />
+          <input
+            type="text"
+            value={rollSearch}
+            onChange={(e) => setRollSearch(e.target.value)}
+            placeholder="Search by name or roll number..."
+            className="w-full bg-surface-container-low border border-outline-variant/5 rounded-full py-3 pl-14 pr-5 text-sm text-white outline-none focus:border-brand-green/30 transition-all"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setSortMode('alphabetical')}
+            className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${
+              sortMode === 'alphabetical'
+                ? 'bg-brand-green text-surface border-brand-green'
+                : 'bg-surface-container-high text-outline border-outline-variant/10 hover:text-white'
+            }`}
           >
-            Mark All Present
+            Alphabetical
           </button>
-          <div className="flex gap-2">
-            <button className="px-4 py-2 bg-surface-container-high text-white rounded-full text-[10px] font-bold uppercase tracking-widest border border-outline-variant/10">
-              Alpha
+          <button
+            type="button"
+            onClick={() => setSortMode('roll')}
+            className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${
+              sortMode === 'roll'
+                ? 'bg-brand-green text-surface border-brand-green'
+                : 'bg-surface-container-high text-outline border-outline-variant/10 hover:text-white'
+            }`}
+          >
+            Roll Number
+          </button>
+
+          {isElevated && (
+            <button 
+              onClick={() => {
+                setAllStudents(prev => prev.map(s => ({ ...s, status: 'PRESENT' })));
+                setStudents(prev => prev.map(s => ({ ...s, status: 'PRESENT' })));
+              }}
+              className="px-6 py-2.5 bg-brand-green text-surface rounded-full font-bold text-xs uppercase tracking-widest hover:opacity-90 active:scale-95 transition-all"
+            >
+              Mark All Present
             </button>
-            <button className="px-4 py-2 bg-surface-container-low text-outline rounded-full text-[10px] font-bold uppercase tracking-widest border border-outline-variant/10">
-              Roll No
-            </button>
-          </div>
-        </section>
-      )}
+          )}
+        </div>
+      </section>
 
       {/* Student List */}
       {isLoading ? (
@@ -616,19 +748,24 @@ export default function AttendanceScreen({ onBack, user }: AttendanceScreenProps
                     </div>
                   )}
                 </div>
-                <div className="flex flex-col items-start min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-bold text-white text-sm truncate">{student.name}</h4>
-                    {student.lastModifiedBy && (
-                      <div className="flex items-center gap-1 px-1.5 py-0.5 bg-brand-green/10 text-brand-green rounded-md" title={`Reason: ${student.modificationReason}`}>
-                        <Shield size={8} />
-                        <span className="text-[7px] font-bold uppercase tracking-widest">Modified</span>
-                      </div>
-                    )}
+                  <div className="flex flex-col items-start min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-white text-sm truncate">{student.name}</h4>
+                      <span className="px-2 py-0.5 rounded-md bg-surface-container-high text-brand-green text-[9px] font-bold uppercase tracking-widest">
+                        {student.rollNo}
+                      </span>
+                      {student.lastModifiedBy && (
+                        <div className="flex items-center gap-1 px-1.5 py-0.5 bg-brand-green/10 text-brand-green rounded-md" title={`Reason: ${student.modificationReason}`}>
+                          <Shield size={8} />
+                          <span className="text-[7px] font-bold uppercase tracking-widest">Modified</span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-outline text-[10px] font-bold uppercase tracking-widest">
+                      Roll No. {student.rollNo || 'Not assigned'}
+                    </p>
                   </div>
-                  <p className="text-outline text-[10px] font-bold uppercase tracking-widest">Roll No. {student.rollNo}</p>
                 </div>
-              </div>
               
               {isElevated && (
                 <div className="flex items-center gap-2">

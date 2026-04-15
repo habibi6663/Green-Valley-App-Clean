@@ -6,6 +6,14 @@ import { collection, onSnapshot, query, orderBy, doc, setDoc, updateDoc, deleteD
 import { createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { UserRole } from '../types';
 import { VALID_CLASSES } from '../constants';
+import {
+  getDisplayRollNumber,
+  getNextRollNumberRecord,
+  resolveRollNumberRecord,
+  normalizeRollNumberInput,
+  normalizeSectionCode,
+  type RollNumberMode,
+} from '../lib/rollNumberUtils';
 
 interface AdminDashboardProps {
   onManageUsers: () => void;
@@ -35,6 +43,8 @@ export default function AdminDashboard({
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
+  const [rollNumberMode, setRollNumberMode] = React.useState<RollNumberMode>('auto');
+  const [admissionYear, setAdmissionYear] = React.useState(new Date().getFullYear().toString());
   
   const [formData, setFormData] = React.useState({
     fullName: '',
@@ -43,9 +53,15 @@ export default function AdminDashboard({
     role: 'STUDENT' as UserRole,
     class: '',
     section: '',
+    rollNumber: '',
     assignedClasses: [] as string[],
     childId: ''
   });
+
+  const studentUsers = React.useMemo(
+    () => users.filter((user) => (user.role || '').toUpperCase() === 'STUDENT'),
+    [users],
+  );
 
   React.useEffect(() => {
     console.log('[ADMIN] Initializing real-time User Stream...');
@@ -70,6 +86,7 @@ export default function AdminDashboard({
 
   const openRegisterModal = () => {
     setEditingUser(null);
+    const nextYear = new Date().getFullYear().toString();
     setFormData({
       fullName: '',
       email: '',
@@ -77,9 +94,12 @@ export default function AdminDashboard({
       role: 'STUDENT',
       class: '',
       section: '',
+      rollNumber: '',
       assignedClasses: [],
       childId: ''
     });
+    setRollNumberMode('auto');
+    setAdmissionYear(nextYear);
     setError(null);
     setSuccess(false);
     setIsModalOpen(true);
@@ -102,13 +122,35 @@ export default function AdminDashboard({
       role: (user.role || 'STUDENT') as UserRole,
       class: user.class || '',
       section: user.section || '',
+      rollNumber: user.rollNumber || '',
       assignedClasses: assignedArr,
       childId: user.childId || ''
     });
+    setRollNumberMode(user.rollNumber ? 'manual' : 'auto');
+    setAdmissionYear(String(user.admissionYear || new Date().getFullYear()));
     setError(null);
     setSuccess(false);
     setIsModalOpen(true);
   };
+
+  React.useEffect(() => {
+    if (!isModalOpen || formData.role !== 'STUDENT' || rollNumberMode !== 'auto') return;
+
+    const scope = {
+      classValue: formData.class || VALID_CLASSES[0],
+      section: formData.section || 'A',
+      admissionYear,
+    };
+    const next = getNextRollNumberRecord(
+      studentUsers.filter((student) => student.id !== editingUser?.id),
+      scope,
+    );
+
+    setFormData((prev) => {
+      if (prev.rollNumber === next.rollNumber) return prev;
+      return { ...prev, rollNumber: next.rollNumber };
+    });
+  }, [admissionYear, editingUser?.id, formData.class, formData.role, formData.section, isModalOpen, rollNumberMode, studentUsers]);
 
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -117,9 +159,31 @@ export default function AdminDashboard({
     setError(null);
 
     try {
+      const studentScope = {
+        classValue: formData.class || VALID_CLASSES[0],
+        section: formData.section || 'A',
+        admissionYear,
+      };
+      const rollResolution =
+        formData.role === 'STUDENT'
+          ? resolveRollNumberRecord(
+              studentUsers.filter((student) => student.id !== editingUser?.id),
+              studentScope,
+              formData.rollNumber,
+              rollNumberMode,
+            )
+          : { candidate: null, error: null };
+
+      if (rollResolution.error) {
+        setError(rollResolution.error);
+        return;
+      }
+
       console.log('[AUTH] Registering new personnel:', formData.email);
       const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
       const uid = userCredential.user.uid;
+
+      const rollNumberRecord = rollResolution.candidate;
       
       await setDoc(doc(db, "users", uid), {
         uid: uid,
@@ -127,7 +191,12 @@ export default function AdminDashboard({
         email: formData.email,
         role: formData.role,
         class: formData.role === 'STUDENT' ? formData.class || VALID_CLASSES[0] : "",
-        section: formData.role === 'STUDENT' ? formData.section || "A" : "",
+        section: formData.role === 'STUDENT' ? normalizeSectionCode(formData.section || 'A') : "",
+        rollNumber: formData.role === 'STUDENT' ? rollNumberRecord?.rollNumber || normalizeRollNumberInput(formData.rollNumber) : "",
+        rollNumberKey: formData.role === 'STUDENT' ? rollNumberRecord?.rollNumberKey || '' : "",
+        rollNumberSequence: formData.role === 'STUDENT' ? rollNumberRecord?.rollNumberSequence || null : null,
+        rollNumberMode: formData.role === 'STUDENT' ? rollNumberMode : '',
+        admissionYear: formData.role === 'STUDENT' ? admissionYear : '',
         assignedClasses: formData.role === 'TEACHER' ? formData.assignedClasses.map(c => ({ class: c })) : [],
         childId: formData.role === 'PARENT' ? formData.childId : "",
         createdAt: new Date().toISOString()
@@ -154,12 +223,39 @@ export default function AdminDashboard({
     setError(null);
 
     try {
+      const studentScope = {
+        classValue: formData.class || VALID_CLASSES[0],
+        section: formData.section || 'A',
+        admissionYear,
+      };
+      const rollResolution =
+        formData.role === 'STUDENT'
+          ? resolveRollNumberRecord(
+              studentUsers,
+              studentScope,
+              formData.rollNumber,
+              rollNumberMode,
+              editingUser.id,
+            )
+          : { candidate: null, error: null };
+
+      if (rollResolution.error) {
+        setError(rollResolution.error);
+        return;
+      }
+
       const userRef = doc(db, "users", editingUser.id);
+      const rollNumberRecord = rollResolution.candidate;
       await updateDoc(userRef, {
         fullName: formData.fullName,
         role: formData.role,
         class: formData.role === 'STUDENT' ? formData.class : "",
-        section: formData.role === 'STUDENT' ? formData.section : "",
+        section: formData.role === 'STUDENT' ? normalizeSectionCode(formData.section || 'A') : "",
+        rollNumber: formData.role === 'STUDENT' ? rollNumberRecord?.rollNumber || normalizeRollNumberInput(formData.rollNumber) : "",
+        rollNumberKey: formData.role === 'STUDENT' ? rollNumberRecord?.rollNumberKey || '' : '',
+        rollNumberSequence: formData.role === 'STUDENT' ? rollNumberRecord?.rollNumberSequence || null : null,
+        rollNumberMode: formData.role === 'STUDENT' ? rollNumberMode : '',
+        admissionYear: formData.role === 'STUDENT' ? admissionYear : '',
         assignedClasses: formData.role === 'TEACHER' ? formData.assignedClasses.map(c => ({ class: c })) : [],
         childId: formData.role === 'PARENT' ? formData.childId : ""
       });
@@ -196,7 +292,8 @@ export default function AdminDashboard({
   const filteredUsers = users.filter(user => {
     const matchesRole = filterRole === 'ALL' || (user.role || '').toUpperCase() === filterRole;
     const matchesSearch = (user.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
-                         (user.email || '').toLowerCase().includes(searchQuery.toLowerCase());
+                         (user.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         (user.rollNumber || '').toLowerCase().includes(searchQuery.toLowerCase());
     return matchesRole && matchesSearch;
   });
 
@@ -301,7 +398,13 @@ export default function AdminDashboard({
                       <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Governance Role</label>
                       <select 
                         value={formData.role}
-                        onChange={e => setFormData({...formData, role: e.target.value as UserRole})}
+                        onChange={e => {
+                          const nextRole = e.target.value as UserRole;
+                          setFormData((prev) => ({ ...prev, role: nextRole }));
+                          if (nextRole === 'STUDENT') {
+                            setRollNumberMode('auto');
+                          }
+                        }}
                         className="w-full bg-surface-container-high border border-outline-variant/5 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-brand-green/30 transition-all font-bold appearance-none cursor-pointer"
                       >
                         <option value="ADMIN">ADMIN</option>
@@ -318,32 +421,100 @@ export default function AdminDashboard({
                           initial={{ opacity: 0, height: 0 }}
                           animate={{ opacity: 1, height: 'auto' }}
                           exit={{ opacity: 0, height: 0 }}
-                          className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-2"
+                          className="space-y-4 pb-2"
                         >
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Class (Nursery–8)</label>
-                            <select 
-                              required
-                              value={formData.class}
-                              onChange={e => setFormData({...formData, class: e.target.value})}
-                              className="w-full bg-surface-container-high border border-outline-variant/5 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-brand-green/30 transition-all font-body appearance-none"
-                            >
-                              <option value="" disabled>Select Class</option>
-                              {VALID_CLASSES.map(cls => (
-                                <option key={cls} value={cls}>Class {cls}</option>
-                              ))}
-                            </select>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Class (Nursery–8)</label>
+                              <select 
+                                required
+                                value={formData.class}
+                                onChange={e => setFormData((prev) => ({ ...prev, class: e.target.value }))}
+                                className="w-full bg-surface-container-high border border-outline-variant/5 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-brand-green/30 transition-all font-body appearance-none"
+                              >
+                                <option value="" disabled>Select Class</option>
+                                {VALID_CLASSES.map(cls => (
+                                  <option key={cls} value={cls}>Class {cls}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Section</label>
+                              <input 
+                                required
+                                type="text"
+                                value={formData.section}
+                                onChange={e => setFormData((prev) => ({ ...prev, section: normalizeSectionCode(e.target.value) }))}
+                                placeholder="e.g. A"
+                                className="w-full bg-surface-container-high border border-outline-variant/5 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-brand-green/30 transition-all font-body"
+                              />
+                            </div>
                           </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Admission Year</label>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={admissionYear}
+                                onChange={(e) => setAdmissionYear(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
+                                placeholder="2026"
+                                className="w-full bg-surface-container-high border border-outline-variant/5 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-brand-green/30 transition-all font-body"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Roll Number Mode</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setRollNumberMode('auto')}
+                                  className={`rounded-xl border px-4 py-3 text-[10px] font-bold uppercase tracking-widest transition-all ${
+                                    rollNumberMode === 'auto'
+                                      ? 'border-brand-green bg-brand-green/10 text-brand-green'
+                                      : 'border-outline-variant/10 bg-surface-container-high text-outline hover:text-white'
+                                  }`}
+                                >
+                                  Auto
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setRollNumberMode('manual')}
+                                  className={`rounded-xl border px-4 py-3 text-[10px] font-bold uppercase tracking-widest transition-all ${
+                                    rollNumberMode === 'manual'
+                                      ? 'border-brand-green bg-brand-green/10 text-brand-green'
+                                      : 'border-outline-variant/10 bg-surface-container-high text-outline hover:text-white'
+                                  }`}
+                                >
+                                  Manual
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
                           <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Section</label>
+                            <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Roll Number</label>
                             <input 
                               required
                               type="text"
-                              value={formData.section}
-                              onChange={e => setFormData({...formData, section: e.target.value})}
-                              placeholder="e.g. A"
-                              className="w-full bg-surface-container-high border border-outline-variant/5 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-brand-green/30 transition-all font-body"
+                              inputMode="text"
+                              value={formData.rollNumber}
+                              onChange={e => {
+                                setRollNumberMode('manual');
+                                setFormData((prev) => ({ ...prev, rollNumber: normalizeRollNumberInput(e.target.value) }));
+                              }}
+                              placeholder="Auto: CLASS10-A-023"
+                              readOnly={rollNumberMode === 'auto'}
+                              className="w-full bg-surface-container-high border border-outline-variant/5 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-brand-green/30 transition-all font-body read-only:opacity-80"
                             />
+                            <div className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-widest text-outline">
+                              <span>
+                                {rollNumberMode === 'auto' ? 'Auto-generated from class, section, and year.' : 'Enter the sequence manually.'}
+                              </span>
+                              <span className="text-brand-green">
+                                {formData.rollNumber || 'Preview pending'}
+                              </span>
+                            </div>
                           </div>
                         </motion.div>
                       )}
@@ -577,6 +748,11 @@ export default function AdminDashboard({
                   <div className="flex-1 min-w-0">
                     <h4 className="font-bold text-white text-sm truncate">{user.fullName || 'No Name'}</h4>
                     <p className="text-outline text-[10px] font-bold uppercase tracking-widest truncate">{user.email}</p>
+                    {(user.role || '').toUpperCase() === 'STUDENT' && (
+                      <p className="text-outline/70 text-[9px] font-bold tracking-widest mt-0.5">
+                        Roll No: {getDisplayRollNumber(user)}
+                      </p>
+                    )}
                   </div>
                 </div>
 

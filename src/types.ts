@@ -4,8 +4,14 @@ export interface Student {
   id: string;
   name: string;
   rollNo: string;
+  rollNumber?: string;
+  rollNumberKey?: string;
+  rollNumberSequence?: number;
+  rollNumberMode?: 'manual' | 'auto';
+  admissionYear?: string;
   avatar: string;
   status?: 'PRESENT' | 'ABSENT' | 'PENDING';
+  grade?: string;
   class?: string;
   section?: string;
 }
@@ -57,6 +63,9 @@ export interface Attendance {
   date: string;
   status: 'PRESENT' | 'ABSENT' | 'LATE';
   subject?: string;
+  createdAt?: unknown;
+  rollNumber?: string;
+  rollNumberKey?: string;
 }
 
 export interface Notice {

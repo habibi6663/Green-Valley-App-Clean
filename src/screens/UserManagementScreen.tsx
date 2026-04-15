@@ -7,6 +7,13 @@ import { auth } from '../firebase';
 import { fetchSignInMethodsForEmail } from 'firebase/auth';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { VALID_CLASSES } from '../constants';
+import {
+  getDisplayRollNumber,
+  resolveRollNumberRecord,
+  normalizeRollNumberInput,
+  normalizeSectionCode,
+  type RollNumberMode,
+} from '../lib/rollNumberUtils';
 
 interface UserManagementScreenProps {
   onAddUser: () => void;
@@ -22,9 +29,11 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
   const [isLoading, setIsLoading] = React.useState(true);
 
   const [editingUser, setEditingUser] = React.useState<any | null>(null);
-  const [editForm, setEditForm] = React.useState<{ fullName: string; role: string; class: string; section: string; assignedClasses: string[] }>({ fullName: '', role: '', class: '', section: '', assignedClasses: [] });
+  const [editForm, setEditForm] = React.useState<{ fullName: string; role: string; class: string; section: string; rollNumber: string; assignedClasses: string[] }>({ fullName: '', role: '', class: '', section: '', rollNumber: '', assignedClasses: [] });
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [errorDetails, setErrorDetails] = React.useState<string | null>(null);
+  const [rollNumberMode, setRollNumberMode] = React.useState<RollNumberMode>('manual');
+  const [admissionYear, setAdmissionYear] = React.useState(new Date().getFullYear().toString());
 
   // Real-time listener — purely synchronous, no async inside, no UI shaking
   React.useEffect(() => {
@@ -89,7 +98,8 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
     const matchesSearch =
       nameToMatch.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (u.class || '').toLowerCase().includes(searchQuery.toLowerCase());
+      (u.class || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (u.rollNumber || '').toLowerCase().includes(searchQuery.toLowerCase());
 
     return matchesRole && matchesClass && matchesSection && matchesSearch;
   });
@@ -97,15 +107,39 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
   const handleEditClick = (user: any) => {
     setEditingUser(user);
     const existingAssignments = user.assignedClasses ? user.assignedClasses.map((ac: any) => typeof ac === 'string' ? ac : ac.class).filter(Boolean) : (user.classes || []);
+    const inferredMode: RollNumberMode = user.rollNumberMode === 'auto' ? 'auto' : (user.rollNumber ? 'manual' : 'auto');
     setEditForm({
       fullName: user.fullName || user.name || '',
       role: user.role || 'STUDENT',
       class: user.class || VALID_CLASSES[0],
       section: user.section || 'A',
+      rollNumber: user.rollNumber || '',
       assignedClasses: existingAssignments,
     });
+    setRollNumberMode(inferredMode);
+    setAdmissionYear(String(user.admissionYear || new Date().getFullYear()));
     setErrorDetails(null);
   };
+
+  React.useEffect(() => {
+    if (!editingUser || editForm.role.toLowerCase() !== 'student' || rollNumberMode !== 'auto') return;
+
+    const nextRoll = resolveRollNumberRecord(
+      users,
+      {
+        classValue: editForm.class || VALID_CLASSES[0],
+        section: editForm.section || 'A',
+        admissionYear,
+      },
+      editForm.rollNumber,
+      'auto',
+      editingUser.id,
+    ).candidate;
+
+    if (nextRoll && editForm.rollNumber !== nextRoll.rollNumber) {
+      setEditForm((prev) => ({ ...prev, rollNumber: nextRoll.rollNumber }));
+    }
+  }, [admissionYear, editForm.class, editForm.role, editForm.rollNumber, editForm.section, editingUser, rollNumberMode, users]);
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,12 +161,40 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
         // Build structured assignments or string array depending on app standard
         updatePayload.assignedClasses = editForm.assignedClasses.map(c => ({ class: c }));
         updatePayload.class = editForm.assignedClasses[0] || VALID_CLASSES[0];
+        updatePayload.section = '';
+        updatePayload.rollNumber = '';
+        updatePayload.rollNumberKey = '';
+        updatePayload.rollNumberSequence = null;
+        updatePayload.rollNumberMode = '';
+        updatePayload.admissionYear = '';
       } else {
         if (!VALID_CLASSES.includes(editForm.class)) {
           return setErrorDetails('Invalid class selected.');
         }
+        const scope = {
+          classValue: editForm.class,
+          section: normalizeSectionCode(editForm.section),
+          admissionYear,
+        };
+        const rollResolution = resolveRollNumberRecord(
+          users,
+          scope,
+          editForm.rollNumber,
+          rollNumberMode,
+          editingUser.id,
+        );
+
+        if (rollResolution.error) {
+          return setErrorDetails(rollResolution.error);
+        }
+
         updatePayload.class = editForm.class;
-        updatePayload.section = editForm.section;
+        updatePayload.section = scope.section;
+        updatePayload.rollNumber = rollResolution.candidate?.rollNumber || normalizeRollNumberInput(editForm.rollNumber);
+        updatePayload.rollNumberKey = rollResolution.candidate?.rollNumberKey || '';
+        updatePayload.rollNumberSequence = rollResolution.candidate?.rollNumberSequence || null;
+        updatePayload.rollNumberMode = rollNumberMode;
+        updatePayload.admissionYear = rollResolution.candidate?.admissionYear || admissionYear;
       }
 
       await updateDoc(doc(db, 'users', editingUser.id), updatePayload);
@@ -257,6 +319,7 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
                 <tr className="bg-surface-container-high/30">
                   <th className="px-6 py-4 text-[9px] font-bold text-outline uppercase tracking-widest">Identity</th>
                   <th className="px-6 py-4 text-[9px] font-bold text-outline uppercase tracking-widest">Role</th>
+                  <th className="px-6 py-4 text-[9px] font-bold text-outline uppercase tracking-widest">Roll No</th>
                   <th className="px-6 py-4 text-[9px] font-bold text-outline uppercase tracking-widest">Placement</th>
                   <th className="px-6 py-4 text-[9px] font-bold text-outline uppercase tracking-widest text-right">Actions</th>
                 </tr>
@@ -281,6 +344,11 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
                       <div className="flex items-center gap-2">
                         <span className="text-[9px] font-bold uppercase tracking-widest text-outline">{user.role}</span>
                       </div>
+                    </td>
+                    <td className="px-6 py-5">
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-outline">
+                        {(user.role || '').toUpperCase() === 'STUDENT' ? getDisplayRollNumber(user) : '—'}
+                      </span>
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex items-center gap-2">
@@ -309,7 +377,7 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
                 ))}
                 {filteredUsers.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-6 py-10 text-center text-outline text-xs italic">No users found in the registry.</td>
+                    <td colSpan={5} className="px-6 py-10 text-center text-outline text-xs italic">No users found in the registry.</td>
                   </tr>
                 )}
               </tbody>
@@ -353,7 +421,13 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
                 <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Role</label>
                 <select
                   value={editForm.role}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, role: e.target.value }))}
+                  onChange={(e) => {
+                    const nextRole = e.target.value;
+                    setEditForm(prev => ({ ...prev, role: nextRole }));
+                    if (nextRole.toLowerCase() === 'student') {
+                      setRollNumberMode('auto');
+                    }
+                  }}
                   className="w-full bg-surface-container-high border border-outline-variant/10 rounded-xl px-4 py-3 text-white text-sm focus:border-brand-green/40 transition-all outline-none appearance-none"
                 >
                   <option value="ADMIN">ADMIN</option>
@@ -410,13 +484,71 @@ export default function UserManagementScreen({ onAddUser, onBack }: UserManageme
                       <input
                         type="text"
                         value={editForm.section}
-                        onChange={(e) => setEditForm(prev => ({ ...prev, section: e.target.value }))}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, section: normalizeSectionCode(e.target.value) }))}
                         className="w-full bg-surface-container-high border border-outline-variant/10 rounded-xl px-4 py-3 text-white text-sm focus:border-brand-green/40 transition-all outline-none"
                       />
                     </div>
                   </>
                 )}
               </div>
+
+              {/* Roll Number field — shown only for student roles */}
+              {editForm.role.toLowerCase() === 'student' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Admission Year</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={admissionYear}
+                        onChange={(e) => setAdmissionYear(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
+                        className="w-full bg-surface-container-high border border-outline-variant/10 rounded-xl px-4 py-3 text-white text-sm focus:border-brand-green/40 transition-all outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Roll Mode</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRollNumberMode('auto')}
+                          className={`rounded-xl border px-4 py-3 text-[10px] font-bold uppercase tracking-widest transition-all ${rollNumberMode === 'auto' ? 'border-brand-green bg-brand-green/10 text-brand-green' : 'border-outline-variant/10 bg-surface-container-high text-outline hover:text-white'}`}
+                        >
+                          Auto
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRollNumberMode('manual')}
+                          className={`rounded-xl border px-4 py-3 text-[10px] font-bold uppercase tracking-widest transition-all ${rollNumberMode === 'manual' ? 'border-brand-green bg-brand-green/10 text-brand-green' : 'border-outline-variant/10 bg-surface-container-high text-outline hover:text-white'}`}
+                        >
+                          Manual
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-outline uppercase tracking-widest ml-1">Roll Number</label>
+                    <input
+                      required
+                      type="text"
+                      value={editForm.rollNumber}
+                      onChange={(e) => {
+                        setRollNumberMode('manual');
+                        setEditForm(prev => ({ ...prev, rollNumber: normalizeRollNumberInput(e.target.value) }));
+                      }}
+                      placeholder="Auto: CLASS10-A-023"
+                      readOnly={rollNumberMode === 'auto'}
+                      className="w-full bg-surface-container-high border border-outline-variant/10 rounded-xl px-4 py-3 text-white text-sm focus:border-brand-green/40 transition-all outline-none read-only:opacity-80"
+                    />
+                    <div className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-widest text-outline">
+                      <span>{rollNumberMode === 'auto' ? 'Class-wise sequence will be generated automatically.' : 'Enter the sequence manually.'}</span>
+                      <span className="text-brand-green">{editForm.rollNumber || 'Preview pending'}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-4 pt-4">
                 <button

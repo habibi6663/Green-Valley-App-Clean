@@ -6,6 +6,7 @@ import { collection, query, where, onSnapshot, orderBy, limit, doc, getDocs } fr
 import { Fee, Attendance, UpdateItem } from '../types';
 import { AttendanceAnalytics, calculateAttendanceStats } from '../lib/attendanceUtils';
 import { MOCK_UPDATES } from '../constants';
+import { getDisplayRollNumber } from '../lib/rollNumberUtils';
 
 interface ParentDashboardProps {
   onMakePayment: () => void;
@@ -25,6 +26,7 @@ export default function ParentDashboard({
   const [totalFees, setTotalFees] = React.useState(0);
   const [attendanceStats, setAttendanceStats] = React.useState<AttendanceAnalytics>({ weekly: 0, monthly: 0, yearly: 0 });
   const [userName, setUserName] = React.useState('Parent');
+  const [childRollNumber, setChildRollNumber] = React.useState('Not assigned');
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
@@ -55,6 +57,7 @@ export default function ParentDashboard({
       }
 
       const studentId = studentsSnapshot.docs[0].id;
+      setChildRollNumber(getDisplayRollNumber(studentsSnapshot.docs[0].data()));
 
       // Fetch Fees
       const feesQuery = query(
@@ -126,6 +129,9 @@ export default function ParentDashboard({
           Welcome, <span className="text-brand-green">{userName}.</span>
         </motion.h2>
         <p className="text-outline text-sm font-medium tracking-wide">Track your child's progress and manage school requirements.</p>
+        <p className="text-[10px] font-bold text-outline uppercase tracking-widest">
+          Child Roll No. <span className="text-white">{childRollNumber}</span>
+        </p>
       </section>
 
       {/* Academic Vault Shortcut */}

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { db, auth, storage } from '../firebase';
 import { collection, onSnapshot, query, addDoc, doc, updateDoc, deleteDoc, where, Query, DocumentData } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { getTeacherClassList } from '../lib/teacherClassUtils';
 import { VALID_CLASSES } from '../constants';
@@ -477,14 +478,14 @@ export default function AcademicVault({ role, user }: AcademicVaultProps) {
       {isAdmin && analytics && (
         <section className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
           <div className="bg-surface-container-low rounded-3xl p-4 md:p-8 border border-outline-variant/5">
-            <h3 className="text-outline text-[10px] font-bold uppercase tracking-widest mb-6 border-b border-outline-variant/10 pb-4 flex items-center gap-2">
-              <Calculator size={14} /> Class-wise Distribution
-            </h3>
-            <div className="space-y-6">
-              {Object.entries(analytics.byClass).map(([cls, count]) => (
-                <div key={cls} className="space-y-2">
-                  <div className="flex justify-between text-xs font-bold tracking-tight">
-                    <span className="text-white">Class {cls}</span>
+              <h3 className="text-outline text-[10px] font-bold uppercase tracking-widest mb-6 border-b border-outline-variant/10 pb-4 flex items-center gap-2">
+                <Calculator size={14} /> Class-wise Distribution
+              </h3>
+              <div className="space-y-6">
+              {(Object.entries(analytics.byClass) as [string, number][]).map(([cls, count]) => (
+                  <div key={cls} className="space-y-2">
+                    <div className="flex justify-between text-xs font-bold tracking-tight">
+                      <span className="text-white">Class {cls}</span>
                     <span className="text-brand-green">{count} Notes</span>
                   </div>
                   <div className="h-2 bg-surface-container-high rounded-full overflow-hidden">
@@ -504,7 +505,7 @@ export default function AcademicVault({ role, user }: AcademicVaultProps) {
               <Microscope size={14} /> Subject Analysis
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {Object.entries(analytics.bySubject).map(([sub, count]) => (
+              {(Object.entries(analytics.bySubject) as [string, number][]).map(([sub, count]) => (
                 <div key={sub} className="p-4 bg-surface-container-high rounded-2xl border border-outline-variant/5">
                   <p className="text-[10px] font-bold text-outline uppercase tracking-widest opacity-60 mb-1">{sub}</p>
                   <p className="text-2xl font-bold text-white tracking-tight">{count}</p>

@@ -38,6 +38,7 @@
 
   html {
     scroll-behavior: smooth;
+    height: 100%;
   }
 
   body {
@@ -46,6 +47,10 @@
     background-size: 24px 24px;
     background-attachment: fixed;
     overflow-x: hidden;
+    /* Do NOT use overflow-y: hidden — it blocks scroll */
+    min-height: 100%;
+    /* Support iOS safe areas for bottom nav */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   #root {
@@ -64,6 +69,12 @@
 
   input:hover, select:hover, textarea:hover {
     @apply border-outline-variant/40;
+  }
+
+  /* Prevent any screen from causing horizontal scroll */
+  .screen-root {
+    max-width: 100%;
+    overflow-x: hidden;
   }
 }
 
