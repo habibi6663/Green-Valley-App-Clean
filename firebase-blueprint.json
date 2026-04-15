@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "users": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "role": { "type": "string", "enum": ["ADMIN", "TEACHER", "STUDENT", "PARENT"], "description": "User role in the system" },
+        "name": { "type": "string", "description": "User's full name" }
+      },
+      "required": ["uid", "email", "role", "name"]
+    },
+    "students": {
+      "title": "Student",
+      "description": "Student academic information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Student UID (matches users.uid)" },
+        "name": { "type": "string", "description": "Student's full name" },
+        "class": { "type": "string", "description": "Assigned class/grade" },
+        "parentId": { "type": "string", "description": "UID of the parent user" }
+      },
+      "required": ["uid", "name", "class"]
+    },
+    "attendance": {
+      "title": "Attendance",
+      "description": "Daily attendance records for students",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "UID of the student" },
+        "date": { "type": "string", "format": "date", "description": "Date of attendance" },
+        "status": { "type": "string", "enum": ["PRESENT", "ABSENT", "LATE"], "description": "Attendance status" }
+      },
+      "required": ["studentId", "date", "status"]
+    },
+    "notes": {
+      "title": "Note",
+      "description": "Academic notes and resources",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string", "description": "UID of the teacher who uploaded the note" },
+        "subject": { "type": "string", "description": "Academic subject" },
+        "content": { "type": "string", "description": "Content or description of the note" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Upload timestamp" },
+        "title": { "type": "string", "description": "Title of the note" }
+      },
+      "required": ["teacherId", "subject", "title", "createdAt"]
+    },
+    "fees": {
+      "title": "Fee",
+      "description": "Student fee and payment records",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "UID of the student" },
+        "amount": { "type": "number", "description": "Fee amount" },
+        "status": { "type": "string", "enum": ["PAID", "PENDING", "OVERDUE"], "description": "Payment status" },
+        "dueDate": { "type": "string", "format": "date", "description": "Payment deadline" }
+      },
+      "required": ["studentId", "amount", "status"]
+    },
+    "assignments": {
+      "title": "Assignment",
+      "description": "Academic assignments for students",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Assignment title" },
+        "description": { "type": "string", "description": "Detailed description" },
+        "dueDate": { "type": "string", "format": "date", "description": "Submission deadline" },
+        "priority": { "type": "string", "enum": ["High", "Normal", "Optional"], "description": "Task priority" },
+        "classId": { "type": "string", "description": "ID of the class/subject" },
+        "studentId": { "type": "string", "description": "UID of the student (if individual assignment)" }
+      },
+      "required": ["title", "dueDate", "priority"]
+    }
+  },
+  "firestore": {
+    "users/{uid}": {
+      "schema": "users",
+      "description": "User profile documents"
+    },
+    "students/{studentId}": {
+      "schema": "students",
+      "description": "Student academic documents"
+    },
+    "attendance/{attendanceId}": {
+      "schema": "attendance",
+      "description": "Attendance records"
+    },
+    "notes/{noteId}": {
+      "schema": "notes",
+      "description": "Academic notes"
+    },
+    "fees/{feeId}": {
+      "schema": "fees",
+      "description": "Fee records"
+    },
+    "assignments/{assignmentId}": {
+      "schema": "assignments",
+      "description": "Assignment records"
+    }
+  }
+}

@@ -1,0 +1,132 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid, email, role, name
+    //
+    // Collection: students
+    // Fields: uid, name, class, parentId
+    //
+    // Collection: attendance
+    // Fields: studentId, date, status
+    //
+    // Collection: notes
+    // Fields: teacherId, subject, title, content, createdAt
+    //
+    // Collection: fees
+    // Fields: studentId, amount, status
+    //
+    // Collection: assignments
+    // Fields: title, description, dueDate, priority, classId, studentId
+    //
+    // Collection: notices
+    // Fields: title, content, createdAt, createdBy
+    //
+    // Collection: events
+    // Fields: title, description, date, createdAt
+    //
+    // Collection: gallery
+    // Fields: imageUrl, caption, createdAt, uploadedBy
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && getRole() == role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN') ||
+        ((request.auth.token.email == 'greenvalleyschool119@gmail.com' || request.auth.token.email == 'darkn8gaming@gmail.com') && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isTeacher() { return hasRole('TEACHER'); }
+    function isStudent() { return hasRole('STUDENT'); }
+    function isParent() { return hasRole('PARENT'); }
+
+    function isParentOf(studentId) {
+      return isParent() && get(/databases/$(database)/documents/students/$(studentId)).data.parentId == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if (isOwner(userId) && request.resource.data.role in ['STUDENT', 'PARENT']) || isAdmin();
+      allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role);
+    }
+
+    match /students/{studentId} {
+      allow read: if isAdmin() || isTeacher() || isOwner(studentId) || isParentOf(studentId);
+      allow create: if isOwner(studentId) || isAdmin();
+      allow update: if isAdmin() || isOwner(studentId);
+      allow delete: if isAdmin();
+    }
+
+    match /attendance/{id} {
+      allow read: if isAdmin() || isTeacher() || isOwner(resource.data.studentId) || isParentOf(resource.data.studentId);
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /notes/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /fees/{id} {
+      allow read: if isAdmin() || isOwner(resource.data.studentId) || isParentOf(resource.data.studentId);
+      allow create: if isAdmin();
+      allow update: if isAdmin() || isOwner(resource.data.studentId) || isParentOf(resource.data.studentId);
+      allow delete: if isAdmin();
+    }
+
+    match /assignments/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /homework/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isTeacher();
+      allow update, delete: if isTeacher() || isAdmin();
+    }
+
+    match /notices/{id} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /events/{id} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /gallery/{id} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
