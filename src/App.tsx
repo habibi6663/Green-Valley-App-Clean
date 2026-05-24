@@ -7,27 +7,28 @@ import React from 'react';
 import { UserRole } from './types';
 import Layout from './components/ResponsiveLayout';
 import LoginScreen from './screens/LoginScreen';
-import AdminDashboard from './screens/AdminDashboard';
-import TeacherDashboard from './screens/TeacherDashboard';
-import StudentDashboard from './screens/StudentDashboard';
-import ParentDashboard from './screens/ParentDashboard';
-import AttendanceScreen from './screens/AttendanceScreen';
-import AcademicVault from './screens/AcademicVault';
-import PaymentScreen from './screens/PaymentScreen';
-import UserManagementScreen from './screens/UserManagementScreen';
-import ReportGenerationScreen from './screens/ReportGenerationScreen';
-import MessagingScreen from './screens/MessagingScreen';
-import AssignmentListScreen from './screens/AssignmentListScreen';
-import BillingHistoryScreen from './screens/BillingHistoryScreen';
-import ProfileScreen from './screens/ProfileScreen';
-import NoticesScreen from './screens/NoticesScreen';
-import EventsScreen from './screens/EventsScreen';
-import GalleryScreen from './screens/GalleryScreen';
-import HomeworkScreen from './screens/HomeworkScreen';
 import NetworkStatusBanner from './components/NetworkStatusBanner';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+
+const AdminDashboard = React.lazy(() => import('./screens/AdminDashboard'));
+const TeacherDashboard = React.lazy(() => import('./screens/TeacherDashboard'));
+const StudentDashboard = React.lazy(() => import('./screens/StudentDashboard'));
+const ParentDashboard = React.lazy(() => import('./screens/ParentDashboard'));
+const AttendanceScreen = React.lazy(() => import('./screens/AttendanceScreen'));
+const AcademicVault = React.lazy(() => import('./screens/AcademicVault'));
+const PaymentScreen = React.lazy(() => import('./screens/PaymentScreen'));
+const UserManagementScreen = React.lazy(() => import('./screens/UserManagementScreen'));
+const ReportGenerationScreen = React.lazy(() => import('./screens/ReportGenerationScreen'));
+const MessagingScreen = React.lazy(() => import('./screens/MessagingScreen'));
+const AssignmentListScreen = React.lazy(() => import('./screens/AssignmentListScreen'));
+const BillingHistoryScreen = React.lazy(() => import('./screens/BillingHistoryScreen'));
+const ProfileScreen = React.lazy(() => import('./screens/ProfileScreen'));
+const NoticesScreen = React.lazy(() => import('./screens/NoticesScreen'));
+const EventsScreen = React.lazy(() => import('./screens/EventsScreen'));
+const GalleryScreen = React.lazy(() => import('./screens/GalleryScreen'));
+const HomeworkScreen = React.lazy(() => import('./screens/HomeworkScreen'));
 
 const DASHBOARD_PATHS: Record<UserRole, string> = {
   ADMIN: '/admin',
@@ -69,6 +70,19 @@ function syncDashboardPath(role: UserRole | null) {
   if (window.location.pathname !== nextPath) {
     window.history.replaceState(null, '', nextPath);
   }
+}
+
+function ScreenLoadingFallback() {
+  return (
+    <div className="flex min-h-[55vh] items-center justify-center rounded-3xl border border-outline-variant/10 bg-surface-container-low px-4 py-10">
+      <div className="flex flex-col items-center gap-4 text-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-2 border-brand-green/20 border-t-brand-green" />
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-outline">
+          Loading secure module...
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -233,76 +247,78 @@ export default function App() {
     const NotesScreen = () => <AcademicVault role={role} user={currentUser} />;
 
     // Handle sub-views with role-based validation
-    if (currentView === 'payment' && role === 'PARENT') {
-      return <PaymentScreen onBack={() => setCurrentView(null)} onViewHistory={() => setActiveTab('fees')} />;
-    }
-    if (currentView === 'users' && (role === 'ADMIN' || role === 'TEACHER')) {
-      return <UserManagementScreen onAddUser={() => setCurrentView('addUser')} onBack={() => setCurrentView(null)} />;
-    }
-    if (currentView === 'reports' && role === 'ADMIN') {
-      return <ReportGenerationScreen onBack={() => setCurrentView(null)} />;
-    }
-    if (currentView === 'messaging' && (role === 'PARENT' || role === 'TEACHER' || role === 'ADMIN')) {
-      return <MessagingScreen onBack={() => setCurrentView(null)} />;
-    }
-    if (currentView === 'assignments' && (role === 'STUDENT' || role === 'TEACHER')) {
-      return <AssignmentListScreen onBack={() => setCurrentView(null)} />;
-    }
+    return (
+      <React.Suspense fallback={<ScreenLoadingFallback />}>
+        {currentView === 'payment' && role === 'PARENT' && (
+          <PaymentScreen onBack={() => setCurrentView(null)} onViewHistory={() => setActiveTab('fees')} />
+        )}
+        {currentView === 'users' && (role === 'ADMIN' || role === 'TEACHER') && (
+          <UserManagementScreen onAddUser={() => setCurrentView('addUser')} onBack={() => setCurrentView(null)} />
+        )}
+        {currentView === 'reports' && role === 'ADMIN' && (
+          <ReportGenerationScreen onBack={() => setCurrentView(null)} />
+        )}
+        {currentView === 'messaging' && (role === 'PARENT' || role === 'TEACHER' || role === 'ADMIN') && (
+          <MessagingScreen onBack={() => setCurrentView(null)} />
+        )}
+        {currentView === 'assignments' && (role === 'STUDENT' || role === 'TEACHER') && (
+          <AssignmentListScreen onBack={() => setCurrentView(null)} />
+        )}
 
-    // Handle main tabs
-    if (activeTab === 'attendance') return <AttendanceScreen onBack={() => setActiveTab('dashboard')} user={currentUser} />;
-    if (activeTab === 'fees') return <BillingHistoryScreen onBack={() => setActiveTab('dashboard')} />;
-    if (activeTab === 'notes') return <NotesScreen />;
-    if (activeTab === 'homework') return <HomeworkScreen role={role} user={currentUser} />;
-    if (activeTab === 'notices') return <NoticesScreen role={role} currentUser={currentUser} />;
-    if (activeTab === 'events') return <EventsScreen role={role} />;
-    if (activeTab === 'gallery') return <GalleryScreen role={role} />;
-    if (activeTab === 'profile') {
-      return <ProfileScreen role={role} />;
-    }
+        {activeTab === 'attendance' && <AttendanceScreen onBack={() => setActiveTab('dashboard')} user={currentUser} />}
+        {activeTab === 'fees' && <BillingHistoryScreen onBack={() => setActiveTab('dashboard')} />}
+        {activeTab === 'notes' && <NotesScreen />}
+        {activeTab === 'homework' && <HomeworkScreen role={role} user={currentUser} />}
+        {activeTab === 'notices' && <NoticesScreen role={role} currentUser={currentUser} />}
+        {activeTab === 'events' && <EventsScreen role={role} />}
+        {activeTab === 'gallery' && <GalleryScreen role={role} />}
+        {activeTab === 'profile' && <ProfileScreen role={role} />}
 
-    // Default Dashboards based on role
-    console.log('[DEBUG] Evaluating Dashboard for role:', role);
-    switch (role?.toString().toUpperCase()) {
-      case 'ADMIN':
-        return (
-          <AdminDashboard 
-            onManageUsers={() => setCurrentView('users')}
-            onGenerateReports={() => setCurrentView('reports')}
-            onViewAttendance={() => setActiveTab('attendance')}
-            onViewFees={() => setActiveTab('fees')}
-            onViewNotes={() => setActiveTab('notes')}
-          />
-        );
-      case 'TEACHER':
-        return (
-          <TeacherDashboard 
-            onTakeAttendance={() => setActiveTab('attendance')} 
-            onUploadNotes={() => setActiveTab('notes')} 
-            onViewClassLists={() => setCurrentView('users')}
-          />
-        );
-      case 'STUDENT':
-        return (
-          <StudentDashboard 
-            onViewBilling={() => setActiveTab('fees')}
-            onViewAssignments={() => setCurrentView('assignments')}
-            onViewNotes={() => setActiveTab('notes')}
-          />
-        );
-      case 'PARENT':
-        return (
-          <ParentDashboard 
-            onMakePayment={() => setCurrentView('payment')}
-            onViewUpdates={() => setActiveTab('dashboard')}
-            onContactTeacher={() => setCurrentView('messaging')}
-            onViewAttendance={() => setActiveTab('attendance')}
-            onViewNotes={() => setActiveTab('notes')}
-          />
-        );
-      default:
-        return <div className="text-white">Dashboard for {role} coming soon.</div>;
-    }
+        {activeTab === 'dashboard' && (() => {
+          console.log('[DEBUG] Evaluating Dashboard for role:', role);
+          switch (role?.toString().toUpperCase()) {
+            case 'ADMIN':
+              return (
+                <AdminDashboard
+                  onManageUsers={() => setCurrentView('users')}
+                  onGenerateReports={() => setCurrentView('reports')}
+                  onViewAttendance={() => setActiveTab('attendance')}
+                  onViewFees={() => setActiveTab('fees')}
+                  onViewNotes={() => setActiveTab('notes')}
+                />
+              );
+            case 'TEACHER':
+              return (
+                <TeacherDashboard
+                  onTakeAttendance={() => setActiveTab('attendance')}
+                  onUploadNotes={() => setActiveTab('notes')}
+                  onViewClassLists={() => setCurrentView('users')}
+                />
+              );
+            case 'STUDENT':
+              return (
+                <StudentDashboard
+                  onViewBilling={() => setActiveTab('fees')}
+                  onViewAssignments={() => setCurrentView('assignments')}
+                  onViewNotes={() => setActiveTab('notes')}
+                />
+              );
+            case 'PARENT':
+              return (
+                <ParentDashboard
+                  onMakePayment={() => setCurrentView('payment')}
+                  onViewUpdates={() => setActiveTab('dashboard')}
+                  onContactTeacher={() => setCurrentView('messaging')}
+                  onViewAttendance={() => setActiveTab('attendance')}
+                  onViewNotes={() => setActiveTab('notes')}
+                />
+              );
+            default:
+              return <div className="text-white">Dashboard for {role} coming soon.</div>;
+          }
+        })()}
+      </React.Suspense>
+    );
   };
 
   return (
