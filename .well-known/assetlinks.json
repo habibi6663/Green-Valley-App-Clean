@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.netlify.greenvalleyschooldmr.twa",
+        "sha256_cert_fingerprints": ["3E:52:2D:59:61:DD:3C:30:37:9C:12:8C:8C:75:2D:AA:2D:87:B8:C9:F5:C9:CA:F7:6C:27:AA:0F:D7:4F:4E:A2"]
+      }
+    }]
